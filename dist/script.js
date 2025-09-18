@@ -771,7 +771,7 @@ class ChangelogReadMore {
     }
     addTruncationIndicator(block, isTruncated) {
         if (!isTruncated) return;
-        // Add a subtle gradient overlay at the bottom to indicate more content
+        // Add a solid color overlay at the bottom to indicate more content
         const overlay = document.createElement('div');
         overlay.className = 'changelog-truncation-overlay';
         overlay.style.cssText = `
@@ -779,8 +779,8 @@ class ChangelogReadMore {
             bottom: 0;
             left: 0;
             right: 0;
-            height: 40px;
-            background: linear-gradient(transparent, rgba(255,255,255,0.8));
+            height: 25%;
+            background: linear-gradient(to bottom, transparent 0%, transparent 30%, #eaeffb 70%, #eaeffb 100%);
             pointer-events: none;
             z-index: 1;
         `;
