@@ -25,32 +25,45 @@ class ChangelogReadMore {
     setupSingleBlock(block, index) {
         // Find the read more button within this block
         const readMoreBtn = block.querySelector('.read_more_btn');
+        const richTextElement = block.querySelector('.changelog_rich_txt');
         
         if (!readMoreBtn) {
             console.warn(`No .read_more_btn found in changelog block ${index}`);
             return;
         }
 
-        // Store original dimensions
-        const originalHeight = block.scrollHeight;
-        const originalOverflow = block.style.overflow;
+        if (!richTextElement) {
+            console.warn(`No .changelog_rich_txt found in changelog block ${index}`);
+            return;
+        }
+
+        // Get the original HTML content from the rich text element
+        const originalHtml = richTextElement.innerHTML;
         
-        // Set initial collapsed state - use a reasonable percentage
-        const collapsedHeight = Math.min(originalHeight * 0.6, Math.max(200, originalHeight * 0.4));
+        // Count words in the text content
+        const textContent = richTextElement.textContent || richTextElement.innerText || '';
+        const words = textContent.trim().split(/\s+/).filter(word => word.length > 0);
         
-        // Position the button absolutely at the bottom of the block
-        this.positionButtonAbsolutely(block, readMoreBtn, collapsedHeight);
+        console.log(`Block ${index}: Found ${words.length} words`);
         
-        // Set initial styles
-        block.style.height = `${collapsedHeight}px`;
-        block.style.overflow = 'hidden';
-        block.style.transition = 'none'; // Disable CSS transitions to avoid conflicts with GSAP
-        block.style.position = 'relative'; // Ensure relative positioning for absolute button
-        
-        // Add a data attribute to track state
+        // Check if content needs truncation (more than 100 words)
+        if (words.length <= 100) {
+            // Content is short enough, hide the read more button
+            console.log(`Block ${index}: Content is short enough (${words.length} words), hiding button`);
+            readMoreBtn.style.visibility = 'hidden';
+            block.setAttribute('data-expanded', 'true');
+            return;
+        }
+
+        // Store original content
+        block.setAttribute('data-original-html', originalHtml);
         block.setAttribute('data-expanded', 'false');
-        block.setAttribute('data-original-height', originalHeight);
-        block.setAttribute('data-collapsed-height', collapsedHeight);
+
+        // Truncate to 100 words while preserving HTML structure
+        console.log(`Block ${index}: Truncating from ${words.length} to 100 words`);
+        const truncatedHtml = this.truncateHtmlPreservingTags(originalHtml, 100);
+        console.log('Truncated HTML:', truncatedHtml);
+        richTextElement.innerHTML = truncatedHtml;
 
         // Add click event listener to the read more button
         readMoreBtn.addEventListener('click', (e) => {
@@ -58,8 +71,200 @@ class ChangelogReadMore {
             this.expandBlock(block, readMoreBtn);
         });
 
-        // Add visual indicator that content is truncated
-        this.addTruncationIndicator(block, collapsedHeight < originalHeight);
+        // Position button at the end of content
+        this.positionButtonInline(block, readMoreBtn);
+    }
+
+    extractTextContent(block) {
+        // Clone the block to avoid modifying the original
+        const clone = block.cloneNode(true);
+        // Remove the read more button from the clone
+        const readMoreBtn = clone.querySelector('.read_more_btn');
+        if (readMoreBtn) {
+            readMoreBtn.remove();
+        }
+        // Get text content
+        return clone.textContent || clone.innerText || '';
+    }
+
+    truncateHtmlPreservingTags(htmlContent, wordLimit) {
+        console.log('truncateHtmlPreservingTags called with word limit:', wordLimit);
+        
+        // Create a temporary container to work with the HTML
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = htmlContent;
+        
+        // Get all text content to count words
+        const allText = tempDiv.textContent || tempDiv.innerText || '';
+        const allWords = allText.trim().split(/\s+/).filter(word => word.length > 0);
+        
+        console.log(`Total words found: ${allWords.length}`);
+        
+        // If content is already short enough, return as is
+        if (allWords.length <= wordLimit) {
+            console.log('Content is already short enough, returning original');
+            return htmlContent;
+        }
+        
+        // Get all text nodes using TreeWalker
+        const walker = document.createTreeWalker(
+            tempDiv,
+            NodeFilter.SHOW_TEXT,
+            null,
+            false
+        );
+        
+        let wordCount = 0;
+        let truncated = false;
+        let truncationNode = null;
+        const textNodes = [];
+        
+        // Collect all text nodes
+        let node;
+        while (node = walker.nextNode()) {
+            textNodes.push(node);
+        }
+        
+        console.log(`Found ${textNodes.length} text nodes to process`);
+        
+        // Process each text node
+        for (let i = 0; i < textNodes.length; i++) {
+            const textNode = textNodes[i];
+            
+            if (truncated) {
+                // Remove all remaining text nodes after truncation
+                textNode.textContent = '';
+                continue;
+            }
+            
+            const nodeText = textNode.textContent.trim();
+            if (!nodeText) continue;
+            
+            const words = nodeText.split(/\s+/).filter(word => word.length > 0);
+            const remainingWords = wordLimit - wordCount;
+            
+            console.log(`Processing text node ${i}: "${nodeText.substring(0, 30)}...", ${words.length} words, ${remainingWords} remaining`);
+            
+            if (words.length <= remainingWords) {
+                // Keep all words in this node
+                wordCount += words.length;
+                console.log(`Keeping all ${words.length} words, total: ${wordCount}`);
+            } else {
+                // Truncate this node
+                const truncatedWords = words.slice(0, remainingWords);
+                textNode.textContent = truncatedWords.join(' ') + '...';
+                console.log(`Truncated to ${truncatedWords.length} words: "${truncatedWords.join(' ')}..."`);
+                truncated = true;
+                truncationNode = textNode;
+                break;
+            }
+        }
+        
+        // Now remove all HTML elements that come after the truncation point
+        if (truncated && truncationNode) {
+            this.removeElementsAfterTruncation(tempDiv, truncationNode);
+        }
+        
+        const result = tempDiv.innerHTML;
+        console.log('Final result length:', result.length);
+        return result;
+    }
+
+    removeElementsAfterTruncation(container, truncationNode) {
+        // Find the parent element of the truncation node
+        let currentElement = truncationNode.parentElement;
+        
+        // Walk up the DOM tree to find the container
+        while (currentElement && currentElement !== container) {
+            // Get all siblings after the current element
+            const nextSiblings = [];
+            let nextSibling = currentElement.nextSibling;
+            while (nextSibling) {
+                nextSiblings.push(nextSibling);
+                nextSibling = nextSibling.nextSibling;
+            }
+            
+            // Remove all next siblings
+            nextSiblings.forEach(sibling => {
+                if (sibling.nodeType === Node.ELEMENT_NODE) {
+                    sibling.remove();
+                }
+            });
+            
+            // Move to parent element
+            currentElement = currentElement.parentElement;
+        }
+        
+        // Also remove any remaining text nodes after the truncation node within the same parent
+        const parent = truncationNode.parentElement;
+        if (parent) {
+            const walker = document.createTreeWalker(
+                parent,
+                NodeFilter.SHOW_TEXT,
+                null,
+                false
+            );
+            
+            let foundTruncationNode = false;
+            let node;
+            while (node = walker.nextNode()) {
+                if (node === truncationNode) {
+                    foundTruncationNode = true;
+                    continue;
+                }
+                
+                if (foundTruncationNode) {
+                    // Remove this text node
+                    node.remove();
+                }
+            }
+        }
+    }
+
+    replaceRichTextContent(richTextElement, newContent) {
+        // Replace the content of the rich text element (can be HTML or text)
+        richTextElement.innerHTML = newContent;
+    }
+
+    replaceTextContent(block, newText) {
+        // Find all text nodes and replace their content
+        const walker = document.createTreeWalker(
+            block,
+            NodeFilter.SHOW_TEXT,
+            null,
+            false
+        );
+
+        const textNodes = [];
+        let node;
+        while (node = walker.nextNode()) {
+            // Skip text nodes that are part of the read more button
+            if (!node.parentElement.classList.contains('read_more_btn')) {
+                textNodes.push(node);
+            }
+        }
+
+        // Replace the first text node with new content, remove others
+        if (textNodes.length > 0) {
+            textNodes[0].textContent = newText;
+            // Remove other text nodes to avoid duplication
+            for (let i = 1; i < textNodes.length; i++) {
+                textNodes[i].remove();
+            }
+        }
+    }
+
+    positionButtonInline(block, readMoreBtn) {
+        // Reset any absolute positioning
+        readMoreBtn.style.position = '';
+        readMoreBtn.style.bottom = '';
+        readMoreBtn.style.left = '';
+        readMoreBtn.style.right = '';
+        readMoreBtn.style.transform = '';
+        readMoreBtn.style.zIndex = '';
+        
+        // Add some spacing before the button
+        readMoreBtn.style.marginLeft = '4px';
     }
 
     positionButtonAbsolutely(block, readMoreBtn, collapsedHeight) {
@@ -96,30 +301,30 @@ class ChangelogReadMore {
             return; // Already expanded
         }
 
-        const originalHeight = parseFloat(block.getAttribute('data-original-height'));
-        const collapsedHeight = parseFloat(block.getAttribute('data-collapsed-height'));
+        // Get the original full HTML content
+        const originalHtml = block.getAttribute('data-original-html');
+        const richTextElement = block.querySelector('.changelog_rich_txt');
+        
+        if (!originalHtml) {
+            console.warn('No original HTML content found for block');
+            return;
+        }
 
-        // Hide the read more button immediately when clicked
+        if (!richTextElement) {
+            console.warn('No .changelog_rich_txt found in block');
+            return;
+        }
+
+        // Hide the read more button completely after expansion
         readMoreBtn.style.display = 'none';
         block.setAttribute('data-expanded', 'true');
 
-        // Hide the truncation overlay
-        const overlay = block.querySelector('.changelog-truncation-overlay');
-        if (overlay) {
-            overlay.style.display = 'none';
-        }
+        // Replace truncated content with full HTML content
+        richTextElement.innerHTML = originalHtml;
 
-        // Animate to full height using GSAP
-        gsap.to(block, {
-            height: originalHeight,
-            duration: 0.6,
-            ease: "power2.out",
-            onComplete: () => {
-                // Reset height to auto after animation
-                block.style.height = 'auto';
-                block.style.overflow = originalOverflow || '';
-            }
-        });
+        // Reset block height to auto to fit content
+        block.style.height = 'auto';
+        block.style.overflow = '';
     }
 
     restoreButtonPosition(readMoreBtn) {
@@ -132,58 +337,36 @@ class ChangelogReadMore {
         readMoreBtn.style.zIndex = readMoreBtn.getAttribute('data-original-zindex') || '';
     }
 
-    addTruncationIndicator(block, isTruncated) {
-        if (!isTruncated) return;
-
-        // Add a solid color overlay at the bottom to indicate more content
-        const overlay = document.createElement('div');
-        overlay.className = 'changelog-truncation-overlay';
-        overlay.style.cssText = `
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            height: 25%;
-            background: linear-gradient(to bottom, transparent 0%, transparent 30%, #eaeffb 70%, #eaeffb 100%);
-            pointer-events: none;
-            z-index: 1;
-        `;
-        
-        // Make sure the block has relative positioning
-        if (getComputedStyle(block).position === 'static') {
-            block.style.position = 'relative';
-        }
-        
-        block.appendChild(overlay);
-    }
 
     // Method to reset all blocks to collapsed state (useful for testing)
     resetAllBlocks() {
         this.changelogBlocks.forEach(block => {
             const readMoreBtn = block.querySelector('.read_more_btn');
-            const collapsedHeight = parseFloat(block.getAttribute('data-collapsed-height'));
+            const richTextElement = block.querySelector('.changelog_rich_txt');
+            const originalHtml = block.getAttribute('data-original-html');
             
-            if (readMoreBtn) {
-                readMoreBtn.style.display = '';
-                readMoreBtn.style.opacity = '1';
-                // Re-position button absolutely
-                this.positionButtonAbsolutely(block, readMoreBtn, collapsedHeight);
+            if (readMoreBtn && richTextElement && originalHtml) {
+                readMoreBtn.style.visibility = 'visible';
+                readMoreBtn.style.marginLeft = '4px';
+                
+                // Count words in original content
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = originalHtml;
+                const textContent = tempDiv.textContent || tempDiv.innerText || '';
+                const words = textContent.trim().split(/\s+/).filter(word => word.length > 0);
+                
+                if (words.length > 100) {
+                    const truncatedHtml = this.truncateHtmlPreservingTags(originalHtml, 100);
+                    richTextElement.innerHTML = truncatedHtml;
+                    block.setAttribute('data-expanded', 'false');
+                } else {
+                    block.setAttribute('data-expanded', 'true');
+                }
             }
             
-            block.style.height = `${collapsedHeight}px`;
-            block.style.overflow = 'hidden';
-            block.style.position = 'relative';
-            block.setAttribute('data-expanded', 'false');
-            
-            // Remove any existing overlay
-            const overlay = block.querySelector('.changelog-truncation-overlay');
-            if (overlay) {
-                overlay.remove();
-            }
-            
-            // Re-add truncation indicator if needed
-            const originalHeight = parseFloat(block.getAttribute('data-original-height'));
-            this.addTruncationIndicator(block, collapsedHeight < originalHeight);
+            // Reset block styles
+            block.style.height = 'auto';
+            block.style.overflow = '';
         });
     }
 
